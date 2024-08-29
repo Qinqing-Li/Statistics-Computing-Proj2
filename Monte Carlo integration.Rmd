@@ -1,0 +1,151 @@
+---
+title: 'MC Integration'
+author: "Qinqing Li, s2024889"
+output:
+  pdf_document:
+    number_sections: yes
+  html_document:
+    number_sections: yes
+header-includes:
+  - \newcommand{\bm}[1]{\boldsymbol{#1}}
+  - \newcommand{\mat}[1]{\begin{bmatrix}#1\end{bmatrix}}
+---
+
+```{r setup, include = FALSE}
+# Modify this setup code chunk to set options
+# or add extra packages etc if needed.
+# See the project instructions for more details
+# on what code to show, and where/how.
+library(ggplot2)
+library(dplyr)
+# Set default code chunk options
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE
+)
+```
+
+# Overdispersed relative to Poisson distribution
+
+approach 1
+```{r}
+# Vectorised over m
+mu <- log(2) - 1/2
+K <- 10000
+m <- 0:15
+P_Y <- numeric(length(m))
+for (loop in seq_len(K)) {
+  x <- rnorm(1, sd = 1)
+  P_Y <- P_Y + dpois(m, lambda = exp(mu + x))
+}
+P_Y <- P_Y / K
+print(P_Y)
+
+
+suppressPackageStartupMessages(library(ggplot2))
+ggplot(data.frame(m = m,
+                  P_Y = P_Y,
+                  P_Poisson = dpois(m, lambda = 2))) +
+  geom_point(aes(m, P_Y, col = "MC")) +
+  geom_point(aes(m, P_Poisson, col = "Poisson")) +
+  geom_line(aes(m, P_Y, col = "MC")) +
+  geom_line(aes(m, P_Poisson, col = "Poisson"))
+```
+
+approach 2
+```{r}
+K <- 10000
+m <- 0:15
+mu <- log(2) - 1/2
+for (i in seq_along(m)) {
+  x <- rnorm(K, sd = 1)
+  total <- sum(dpois(m[i], lambda = exp(mu + x)))/K
+  print(total)
+}
+
+suppressPackageStartupMessages(library(ggplot2))
+ggplot(data.frame(m = m,
+                  P_Y = P_Y,
+                  P_Poisson = dpois(m, lambda = 2))) +
+  geom_point(aes(m, P_Y, col = "MC")) +
+  geom_point(aes(m, P_Poisson, col = "Poisson")) +
+  geom_line(aes(m, P_Y, col = "MC")) +
+  geom_line(aes(m, P_Poisson, col = "Poisson"))
+```
+
+```{r}
+doverpois <- function(m, mu, sigma, K) {
+  total <- numeric(length(m))
+  
+  for (i in seq_along(m)) {
+    x <- rnorm(K, sd = 1) 
+    total[i] <- sum(dpois(m[i], lambda = exp(mu + x))) / K
+  }
+  data.frame(
+    m = m,
+    P_Y = total,
+    P_Poisson = dpois(m, lambda = exp(mu + sigma^2 / 2))
+  )
+}
+
+```
+
+```{r}
+ggplot(doverpois(m = 0:30, mu = log(8) - 0.125, sigma = 0.5, K = 10000))
+suppressPackageStartupMessages(library(ggplot2))
+ggplot(doverpois(m = 0:30, mu = log(8)-0.125, sigma = 0.5, K = 10000)) +
+  geom_point(aes(m, P_Y, col = "MC")) +
+  geom_point(aes(m, P_Poisson, col = "Poisson")) +
+  geom_line(aes(m, P_Y, col = "MC")) +
+  geom_line(aes(m, P_Poisson, col = "Poisson"))
+```
+
+# Archaeology in the Baltic sea - using Monte Carlo integration
+
+The aim of this simulation is to estimate the true value of N, which represents the total number of people buried, and ϕ, the probability of finding a femur (left or right).
+
+Our prior belief is that there are approximately $1000$ individuals buried, and the probability of finding a femur (either left or right) is $0.5$. The prior distribution is $N~Geom(\xi)$ where $\xi = \frac{1}[1+1000}$, and $\phi ~ beta(2,2)$.
+
+```{r}
+arch_loglike <- function(y, dataframe) {
+  y1 <- y[1]
+  y2 <- y[2]
+  N <- dataframe$N
+  phi <- dataframe$phi
+  loglikelihood <- numeric(length(N))  
+
+  for (i in seq_along(N)) {
+    loglike <- -lgamma(y1 + 1) - lgamma(y2 + 1) -
+               lgamma(N[i] - y1 + 1) - lgamma(N[i] - y2 + 1) + 
+               2 * lgamma(N[i] + 1) +
+               (y1 + y2) * log(phi[i]) + 
+               (2 * N[i] - y1 - y2) * log(1 - phi[i])
+    loglikelihood[i] <- loglike
+  }
+
+  return(loglikelihood)
+}
+```
+
+
+
+```{r}
+estimate <- function(y, xi, a, b, K) {
+  set.seed(123)
+  samples <- data.frame(
+    N = rgeom(K, prob = xi),
+    phi = rbeta(K, shape1 = a, shape2 = b)
+  )
+  loglike <- arch_loglike(y = y, dataframe = samples)
+  p_y <- mean(exp(loglike))
+  c(p_y = p_y,
+    E_N = mean(samples$N * exp(loglike) / p_y),
+    E_phi = mean(samples$phi * exp(loglike) / p_y))
+}
+```
+
+```{r}
+estimate(y = c(237, 256), xi = 1/1001, a = 0.5, b = 0.5, K = 10000)
+```
+
+We conclude that there are approximately 982 individuals buried, and the probability of uncovering a femur is 0.39.
