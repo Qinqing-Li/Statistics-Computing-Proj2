@@ -1,2 +1,2 @@
-# Statistics-Computing
-Courseworks and workshops on statistics methods using R.
+# Statistical Computing using R
+Courseworks and workshops on statistics methods.
