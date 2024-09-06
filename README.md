@@ -1,2 +1,3 @@
 # Statistical Computing using R
-Courseworks and workshops on statistics methods.
+revision of Statistical Computing (MATH10093), workshops and courseworks on statistics methods using RMarkdown.
+Source: https://finnlindgren.github.io/StatCompLab/index.html
