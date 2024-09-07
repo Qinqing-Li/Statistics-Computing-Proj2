@@ -1,0 +1,181 @@
+---
+title: "Prediction Scores"
+author: "Qinqing Li"
+date: "2024-09-07"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+data("filament1", package = "StatCompLab")
+library(ggplot2)
+library(StatCompLab)
+library(dplyr)
+library(knitr)
+```
+
+```{r}
+filament1
+```
+
+```{r}
+ggplot(filament1, aes(x = CAD_Weight, y = Actual_Weight, colour = Material)) +
+  geom_point() + 
+  labs(title = "CAD Weight vs Actual Weight", 
+       x = "CAD Weight", 
+       y = "Actual Weight") +
+  theme_minimal()  # Optional: a clean theme
+
+```
+
+
+## Estimate
+Construct model A and B based on CAD_Weight, to estimate Actual_Weight:
+```{r}
+#Note model can only take A or B
+est_A <-filament1_estimate(filament1, "A")
+est_B <-filament1_estimate(filament1, "B")
+```
+
+## Predict
+Predicted Actual_Weight using models A and B: (since it's predicted, slightly different than real data, I would like to see obs. lie inside the interval (lwr, upr) for good predictions)
+```{r}
+pred_A<- filament1_predict(est_A, filament1)
+pred_B<- filament1_predict(est_B, filament1)
+```
+
+Draw graph of data (points) and ribbon of prediction:
+```{r}
+#First, combine all 4 datasets into 1 dataset: rbind: row bind, cbind: col bindl.
+ggplot(rbind(cbind(pred_A, filament1, Model = "A"),
+             cbind(pred_B, filament1, Model = "B")),
+       mapping = aes(CAD_Weight)) +
+  geom_line(aes(y = mean, col = Model)) +
+  geom_ribbon(aes(ymin = lwr, ymax = upr, fill = Model), alpha = 0.25) +
+  geom_point(aes(y = Actual_Weight), data = filament1)
+```
+
+## Prediction Scores
+
+A scoring rule provides evaluation metrics for predicted prob. distributions. 
+
+Proper scoring rules
+
+A scoring rule S (a loss function) is proper relative to F (a predicted prob. distribution) if (assuming negative orientation) its expected score is minimised when the forecasted prob. distribution matches the distribution of the observation. It is strictly proper if it holds with equality if and only if F = Q. Q is distr. of observations.
+
+```{r}
+score_A <-cbind(filament1,pred_A) %>%
+  mutate(
+    se = proper_score("se", Actual_Weight, mean = mean),
+    ds = proper_score("ds", Actual_Weight, mean = mean, sd = sd),
+    interval = proper_score("interval", Actual_Weight, lwr = lwr, upr = upr, alpha = 0.1)
+)
+
+score_B <-cbind(filament1,pred_B) %>%
+  mutate(
+    se = proper_score("se", Actual_Weight, mean = mean),
+    ds = proper_score("ds", Actual_Weight, mean = mean, sd = sd),
+    interval = proper_score("interval", Actual_Weight, lwr = lwr, upr = upr, alpha = 0.1)
+)
+```
+
+
+
+```{r cars}
+# na.rm = TRUE means ignore missing values NA
+average_A <- score_A %>%
+  summarise(
+    avg_se = mean(se, na.rm = TRUE),
+    avg_ds = mean(ds, na.rm = TRUE),
+    avg_interval = mean(interval, na.rm = TRUE)
+  )
+
+average_B <- score_B %>%
+  summarise(
+    avg_se = mean(se, na.rm = TRUE),
+    avg_ds = mean(ds, na.rm = TRUE),
+    avg_interval = mean(interval, na.rm = TRUE)
+  )
+
+averages_df <- rbind(
+  cbind(Model = "A", average_A),
+  cbind(Model = "B", average_B)
+)
+
+averages_df %>%
+  kable(col.names = c("Model", "SE", "DS", "Interval"))
+```
+
+Do the scores indicate that one of the models is better or worse than the other? Do the three score types agree with each other?
+
+ans: our scores are negative orientated. On average model B has smaller DS and interval scores, so model B perform better than A. The squared error score (SE) doesn’t really care about the difference between the two models, since it doesn’t directly involve the variance model (the paramter estimates for the mean are different, but not by much). 
+
+## Data splitting
+
+Split the data into two parts, with 50% to be used for parameter estimation, and 50% to be used for prediction assessment.
+```{r pressure, echo=FALSE}
+set.seed(123)
+
+n <- nrow(filament1)
+random_indices <- sample(1:n)
+split_point <- floor(n / 2)
+
+estimation_indices <- random_indices[1:split_point]
+prediction_indices <- random_indices[(split_point + 1):n]
+
+
+data_estimation <- filament1[estimation_indices, ]  # For parameter estimation (50%)
+data_prediction <- filament1[prediction_indices, ]  # For prediction assessment (50%)
+```
+
+
+Redo the previous analysis for the problem using this division of the data:
+
+```{r}
+#training model A and B using data_estimation
+est_A1 <-filament1_estimate(data_estimation, "A")
+est_B1 <-filament1_estimate(data_estimation, "B")
+#After training (the parameters), the models are applied to the new dataset filament1_pred. This function is responsible for generating predictions for the unseen data
+pred_A1<- filament1_predict(est_A1, data_prediction)
+pred_B1<- filament1_predict(est_B1, data_prediction)
+
+
+score_A1 <-cbind(data_prediction,pred_A1) %>%
+  mutate(
+    se = proper_score("se", Actual_Weight, mean = mean),
+    ds = proper_score("ds", Actual_Weight, mean = mean, sd = sd),
+    interval = proper_score("interval", Actual_Weight, lwr = lwr, upr = upr, alpha = 0.1)
+)
+
+score_B1 <-cbind(data_prediction,pred_B1) %>%
+  mutate(
+    se = proper_score("se", Actual_Weight, mean = mean),
+    ds = proper_score("ds", Actual_Weight, mean = mean, sd = sd),
+    interval = proper_score("interval", Actual_Weight, lwr = lwr, upr = upr, alpha = 0.1)
+)
+
+average_A1 <- score_A1 %>%
+  summarise(
+    avg_se = mean(se, na.rm = TRUE),
+    avg_ds = mean(ds, na.rm = TRUE),
+    avg_interval = mean(interval, na.rm = TRUE)
+  )
+
+average_B1 <- score_B1 %>%
+  summarise(
+    avg_se = mean(se, na.rm = TRUE),
+    avg_ds = mean(ds, na.rm = TRUE),
+    avg_interval = mean(interval, na.rm = TRUE)
+  )
+
+averages_df1 <- rbind(
+  cbind(Model = "A", average_A1),
+  cbind(Model = "B", average_B1)
+)
+
+averages_df1 %>%
+  kable(col.names = c("Model", "SE", "DS", "Interval"))
+```
+Model B still performs better with lower DS and interval scores, and SE scores are similar, which agrees with the previous results.
