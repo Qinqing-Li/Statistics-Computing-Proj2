@@ -1,0 +1,169 @@
+---
+title: "Data wrangling and cross validation"
+author: "Qinqing Li"
+date: "2024-09-07"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(StatCompLab)
+```
+
+
+```{r cars}
+data(ghcnd_stations, package = "StatCompLab")
+data(ghcnd_values, package = "StatCompLab")
+```
+
+```{r}
+knitr::kable(ghcnd_stations)
+```
+```{r}
+#counting how many observations each station has, for each type of measurement.
+ghcnd_values %>%
+  count(ID,Element) %>%
+  knitr::kable()
+```
+
+
+## Exploratory plotting
+```{r}
+ghcnd <- left_join(ghcnd_values, ghcnd_stations, by = "ID")
+head(ghcnd)
+```
+Now plot daily minimum and maximum temperature measurements connected by lines as a function of time (DecYear), with a different colour for each element, and a separate subplot for each station (facet_wrap(~variablename)), labeled by the station names.
+```{r}
+ghcnd %>%
+  filter(Element %in% c("TMIN", "TMAX")) %>%
+  ggplot(aes(x = DecYear, y = Value, colour = Element)) +  # No need for temp_data here
+  geom_line() +
+  facet_wrap(~ Name) +  # Subplots for each station based on station name
+  labs(title = "Daily Min and Max Temperatures over Time",
+       x = "Decimal Year",
+       y = "Temperature (°C)") +
+  theme_minimal()
+```
+Due to the amount of data, it’s difficult to see clear patterns here. Produce two figures, one showing the yearly averages of TMIN and TMAX as points, and one showing the monthly seasonal averages (for months 1 through 12) of TMIN and TMAX, separately for each station.
+
+Again, avoid creating a temporary named variable. In the previous code, insert calls to group_by() and summarise(), and modify the x-values in the aesthetics.
+```{r}
+ghcnd %>%
+  filter(Element %in% c("TMIN", "TMAX")) %>%
+  group_by(ID, Year, Element) %>%
+  summarise(Average = mean(Value, na.rm = TRUE), .groups = "drop") %>%  # Drop grouping after summarisation
+  ggplot(aes(x = Year, y = Average, colour = Element)) +
+  geom_point() +
+  facet_wrap(~ ID, scales = "free_x") +  # Separate subplots for each station
+  labs(title = "Yearly Averages of TMIN and TMAX",
+       x = "Year",
+       y = "Average Temperature (°C)") +
+  theme_minimal()
+
+ghcnd %>%
+  filter(Element %in% c("TMIN", "TMAX")) %>%
+  group_by(ID, Month, Element) %>%
+  summarise(Average = mean(Value, na.rm = TRUE), .groups = "drop") %>%  # Drop grouping after summarisation
+  ggplot(aes(x = Month, y = Average, colour = Element)) +
+  geom_point() +
+  facet_wrap(~ ID, scales = "free_x") +  # Separate subplots for each station
+  labs(title = "Monthly Averages of TMIN and TMAX",
+       x = "Month",
+       y = "Average Temperature (°C)") +
+  theme_minimal()
+```
+What are the common patterns in the yearly values, and in the monthly seasonal values?
+ans: yearly values doesn't change much, but gradually increase over the decade;
+monthly values fluctuates throughout the year, where Jul and Aug are peak temp.
+
+You can also embed plots, for example:
+
+## Scatter plots
+
+Draw a scatterplot for daily TMIN vs TMAX for each station, with colour determined by the month.
+
+pivot_wider() function manipulate the datset, convert it from long format to wide format. (rearrange rows n cols without deleting information.)
+```{r pressure, echo=FALSE}
+ghcnd %>%
+  filter(Element %in% c("TMIN", "TMAX")) %>%
+  pivot_wider(names_from = Element, values_from = Value) %>%
+  drop_na(TMIN, TMAX) %>% # removes rows from your data where either the TMIN or TMAX values are missing.
+  ggplot(aes(x = TMIN, y = TMAX, colour = factor(Month))) + # factor(Month): This converts the month numbers into a categorical variable, treating each number as a separate category rather than a continuous number.
+  geom_point() +
+  facet_wrap(~ ID) +  # Separate subplots for each station
+  labs(title = "Daily TMIN vs TMAX",
+       x = "Daily Minimum Temperature (°C)",
+       y = "Daily Maximum Temperature (°C)",
+       colour = "Month") +
+  theme_minimal()
+
+```
+
+##Cross validation
+
+Choose one of the stations, and create a new data variable data from ghcnd with the yearly averages of TMIN as a column (as in the previous pivot_wider output), with missing values removed with filter().
+
+```{r}
+data <- ghcnd %>%
+  filter(ID == "UKE00105875") %>%
+  pivot_wider(names_from = Element, values_from = Value) %>%
+  filter(!is.na(TMIN)) %>% # deletes rows where the TMIN value is missing.
+  group_by(ID, Name, Year) %>% # group by station ID, name (essentially the same), and year
+  summarise(TMIN = mean(TMIN), .groups = "drop") # for each group (ID/year), calculate the average TMIN temperature
+```
+
+##Within-sample assessment
+
+Now, using the whole data estimate a linear model for TMIN, with lm() formula TMIN ~ 1 + Year, and compute the average 80% Interval score (use proper_score() that you used in lab 6) for prediction intervals for each of the TMIN observations in data. See ?predict.lm for documentation for the predict() method for models estimated with lm().
+
+
+Below fits a linear regression model where TMIN (the dependent variable) is predicted by Year (the independent variable). The 1 + Year means the model includes both an intercept (1) and the effect of Year on TMIN. The result is stored in the fit0 object.
+```{r}
+fit0 <- lm(TMIN ~ 1 + Year, data = data)
+```
+
+
+```{r}
+#predict() generates predictions from the linear model fit0. It predicts TMIN (from dataset 'data') values based on Year, including an 80% prediction interval (level = 0.8), meaning it provides both the predicted values and the upper (upr) and lower (lwr) bounds for the range within which the true values are expected to fall 80% of the time.
+pred0 <- predict(fit0, newdata = data, interval = "prediction", level = 0.8)
+
+#calculates the average interval score for the TMIN predictions.
+score0 <- mean(proper_score(
+  "interval", data$TMIN,
+  lwr = pred0[, "lwr"], upr = pred0[,"upr"], alpha = 0.8))
+```
+
+##Cross validation
+
+We now want to compute the 5 average 80% Interval scores from 5-fold cross validation based on a random partition of the data into 5 approximately equal parts.
+
+First add a new column Group to data defining the partitioning, using mutate(). One approach is to compute a random permutation index vector, and then use the modulus operator %% to reduce it to 5 values, or ceiling() on scaled indices.
+
+
+```{r}
+data <- data %>%
+  mutate(Group = sample(seq_len(nrow(data)), size = nrow(data), replace = FALSE),
+         Group = (Group %% 5) + 1)
+```
+
+```{r}
+scores <- numeric(5)
+for (grp in seq_len(5)) {
+  fit <- lm(TMIN ~ 1 + Year, data = data %>% filter(Group != grp))
+  pred <- predict(fit, newdata = data %>% filter(Group == grp),
+                     interval = "prediction", level = 0.8)
+  scores[grp] <- mean(proper_score(
+    "interval",
+    (data %>% filter(Group == grp)) %>% pull("TMIN"),
+    lwr = pred[, "lwr"], upr = pred[,"upr"], alpha = 0.8))
+}
+```
+
+```{r}
+knitr::kable(data.frame("Whole data score" = score0,
+                        "Cross validation score" = mean(scores)))
+```
+
